@@ -1,0 +1,73 @@
+#Provider
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_security_group" "allow_traffic" {
+  name        = "allow_web_traffic"
+  description = "Allow web inbound traffic"
+  vpc_id      = "vpc-031be92aa458788d3"
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_launch_configuration" "launch" {
+  name          = "example_config"
+  image_id      = "ami-00beae93a2d981137"
+  instance_type = "t2.micro"
+
+  user_data = <<-EOF
+                #!/bin/bash
+                yum update -y
+                yum install -y httpd
+                systemctl start httpd
+                systemctl enable httpd
+                echo "Hello World from $(hostname -f)" > /var/www/html/index.html
+                EOF
+
+  security_groups = [aws_security_group.allow_traffic.id]
+}
+
+resource "aws_autoscaling_group" "ASG" {
+  launch_configuration = aws_launch_configuration.launch.id
+  min_size             = 2
+  max_size             = 5
+  vpc_zone_identifier  = ["subnet-0ed9bccb7de044cb1", "subnet-0aa3a6007e2640a25"]
+
+  tag {
+    key                 = "Name"
+    value               = "instance"
+    propagate_at_launch = true
+  }
+}
+
+# S3 bucket for remote backend
+resource "aws_s3_bucket" "tf_s3_bucket" {
+  bucket = "luit-project10"
+}
+resource "aws_s3_bucket_versioning" "terraform_state_versioning" {
+  bucket = aws_s3_bucket.tf_s3_bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
